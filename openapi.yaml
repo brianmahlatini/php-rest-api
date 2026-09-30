@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info:
+  title: php-rest-api
+  version: 1.0.0
+  description: Task management API with JWT auth and role-based access. Errors use RFC 7807 problem details.
+servers:
+  - url: http://localhost:8080
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Task:
+      type: object
+      properties:
+        id: { type: integer }
+        owner_id: { type: integer }
+        title: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 5000 }
+        status: { type: string, enum: [todo, in_progress, done] }
+        priority: { type: integer, minimum: 1, maximum: 5 }
+        due_date: { type: [string, "null"], format: date }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        errors: { type: object, additionalProperties: { type: array, items: { type: string } } }
+security:
+  - bearer: []
+paths:
+  /health:
+    get: { security: [], responses: { "200": { description: OK } } }
+  /api/auth/register:
+    post:
+      security: []
+      summary: Create an account (rate limited per IP)
+      responses: { "201": { description: Created, returns user and token }, "409": { description: Email taken }, "422": { description: Invalid input } }
+  /api/auth/login:
+    post:
+      security: []
+      summary: Exchange credentials for a JWT (rate limited per IP)
+      responses: { "200": { description: OK }, "401": { description: Invalid credentials }, "429": { description: Too many attempts } }
+  /api/auth/me:
+    get: { responses: { "200": { description: Current user } } }
+  /api/tasks:
+    get:
+      summary: List own tasks (admins may pass scope=all)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [todo, in_progress, done] } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses: { "200": { description: Paginated tasks } }
+    post: { responses: { "201": { description: Created }, "422": { description: Invalid input } } }
+  /api/tasks/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    get: { responses: { "200": { description: Task }, "404": { description: Not found or not yours } } }
+    patch: { responses: { "200": { description: Updated } } }
+    delete: { responses: { "204": { description: Deleted } } }
+  /api/admin/users:
+    get: { summary: List users (admin only), responses: { "200": { description: Paginated users }, "403": { description: Not an admin } } }
+  /api/admin/users/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    patch: { summary: Change a user's role (admin only), responses: { "200": { description: Updated }, "409": { description: Would remove the last admin } } }

@@ -1,0 +1,40 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Usage: bin/console migrate
+//        ADMIN_PASSWORD=... bin/console create-admin <email> <name>
+use App\Database\ConnectionFactory;
+use App\Database\Migrator;
+use App\Users\UserRepository;
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+$dsn = getenv('DB_DSN') ?: 'sqlite:' . dirname(__DIR__) . '/var/app.sqlite';
+$pdo = ConnectionFactory::create($dsn, getenv('DB_USER') ?: null, getenv('DB_PASSWORD') ?: null);
+
+switch ($argv[1] ?? '') {
+    case 'migrate':
+        $applied = (new Migrator($pdo, dirname(__DIR__) . '/migrations'))->migrate();
+        fwrite(STDOUT, $applied === [] ? "Nothing to migrate.\n" : 'Applied: ' . implode(', ', $applied) . "\n");
+        exit(0);
+    case 'create-admin':
+        [$email, $name] = [strtolower($argv[2] ?? ''), $argv[3] ?? 'Admin'];
+        $password = getenv('ADMIN_PASSWORD') ?: '';   // env, not argv: argv is visible in `ps`
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12) {
+            fwrite(STDERR, "Need a valid email and ADMIN_PASSWORD of at least 12 characters.\n");
+            exit(2);
+        }
+        $users = new UserRepository($pdo);
+        if ($users->findByEmail($email) !== null) {
+            fwrite(STDERR, "User already exists.\n");
+            exit(1);
+        }
+        $users->create($email, $name, password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]), 'admin');
+        fwrite(STDOUT, "Admin {$email} created.\n");
+        exit(0);
+    default:
+        fwrite(STDERR, "Commands: migrate | create-admin <email> <name>\n");
+        exit(2);
+}

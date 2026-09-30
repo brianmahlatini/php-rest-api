@@ -1,0 +1,53 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ["8.3", "8.4"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, mbstring
+          coverage: pcov
+          tools: phpstan, php-cs-fixer
+      - run: composer validate --strict
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: php-cs-fixer fix --dry-run --diff
+        env:
+          PHP_CS_FIXER_IGNORE_ENV: "1"
+      - run: phpstan analyse --no-progress
+      - run: vendor/bin/phpunit --coverage-text
+      - run: composer audit
+
+  # Full stack against real MySQL through nginx: migrations, auth and CRUD over HTTP.
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build --wait db app web
+      - run: docker compose exec -T app bin/console migrate
+      - name: Smoke test over HTTP
+        run: |
+          set -euo pipefail
+          api=http://localhost:8080
+          for _ in $(seq 1 30); do curl -fsS "$api/health" && break; sleep 1; done
+          token=$(curl -fsS -X POST "$api/api/auth/register" -H 'content-type: application/json' \
+            -d '{"email":"ci@example.test","password":"ci-password-123456","name":"CI"}' | jq -r .token)
+          curl -fsS -X POST "$api/api/tasks" -H "authorization: Bearer $token" -H 'content-type: application/json' \
+            -d '{"title":"from CI","priority":1}' | jq -e '.data.title == "from CI"'
+          curl -fsS "$api/api/tasks" -H "authorization: Bearer $token" | jq -e '.meta.total == 1'
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$api/api/tasks")" = 401
+      - if: failure()
+        run: docker compose logs --tail=100
