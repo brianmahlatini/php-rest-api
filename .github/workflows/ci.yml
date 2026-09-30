@@ -27,7 +27,9 @@ jobs:
         env:
           PHP_CS_FIXER_IGNORE_ENV: "1"
       - run: phpstan analyse --no-progress
-      - run: vendor/bin/phpunit --coverage-text
+      - run: vendor/bin/phpunit --coverage-text --log-junit junit.xml
+      - if: failure()
+        run: python3 .github/scripts/junit-annotate.py junit.xml
       - run: composer audit
 
   # Full stack against real MySQL through nginx: migrations, auth and CRUD over HTTP.
